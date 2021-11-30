@@ -1,13 +1,11 @@
 '''
-Based on LibCal API Docs at:
+Based on LibCal API Docs at: https://<your_domain>.libcal.com/admin/api/1.1
 
 License: https://grant-miller.mit-license.org/
 '''
 import datetime
-from copy import copy
-from urllib.parse import urlparse
-
 import requests
+from copy import copy
 
 
 class _TokenManager:
@@ -65,17 +63,23 @@ class _BaseAPI:
         if self.debug:
             print(*a, **k)
 
-    def send_request(self, method, url, params=None):
+    def send_request(self, method, url, params=None, json=None):
+        if params is None and json is not None:
+            params = json
+
         for k, v in params.items():
             if isinstance(v, bool):
                 params[k] = int(v)  # booleans are passed as int 0/1
+            if isinstance(v, (datetime.datetime, datetime.date)):
+                params[k] = v.isoformat()
 
-        self.print('send_request(', method, url, params)
+        self.print('send_request(', method, url, params, json)
 
         resp = requests.request(
             method=method,
             url=url,
             params=params,
+            json=json,
             headers={
                 'Authorization': 'Bearer {}'.format(self.tokenCallback())
             }
@@ -186,7 +190,8 @@ class _Spaces(_BaseAPI):
             attribute_name='categories',
             endpoint='1.1/space/categories/{ids}',
             method='GET',
-            endpointCallback=lambda endpoint, ids: endpoint.format(ids=','.join(str(i) for i in ids)),
+            endpointCallback=lambda endpoint, ids: endpoint.format(
+                ids=','.join(str(i) for i in ids) if isinstance(ids, list) else ids),
             defaultParams={'admin_only': False}
         )
         self._add_endpoint(
@@ -251,15 +256,18 @@ class _Spaces(_BaseAPI):
         )
         self._add_endpoint(
             attribute_name='booking',
-            endpoint='1.1/space/booking',
+            endpoint='1.1/space/booking/{ids}',
+            endpointCallback=lambda endp, **kw: endp.format(
+                ids=kw['ids'] if isinstance(kw['ids'], (int, str)) else ','.join(str(i) for i in kw['ids']),
+            ),
             method='GET',
-            requiredParams=['book_ids'],
+            requiredParams=['ids'],
             defaultParams={
-                'formAnswers': False,
+                'formAnswers': None,  # bool
             }
         )
         self._add_endpoint(
-            endpoint='1.1/space/items/bookings',
+            endpoint='1.1/space/bookings',
             method='GET',
             defaultParams={
                 'eid': None,
@@ -268,7 +276,7 @@ class _Spaces(_BaseAPI):
                 'lid': None,
                 'email': None,
                 'date': datetime.date.today(),
-                'days': 0,
+                'days': 1,
                 'limit': 20,
                 'page': 1,
                 'formAnswers': False,
@@ -324,6 +332,40 @@ class _Spaces(_BaseAPI):
             endpointCallback=lambda endp, **kw: endp.format(**kw),
             requiredParams=['location_id'],
         )
+
+    # helper functions
+    def is_available_at(self, location_id=None, space_id=None, seat_id=None, dt=None):
+        dt = dt or datetime.datetime.now().astimezone()
+
+        seats = self.seats(
+            location_id=location_id,
+            spaceId=space_id,
+        )
+        if seat_id:
+            for item in seats:
+
+                for fromTo in item['availability']:
+                    from_ = datetime.datetime.fromisoformat(
+                        fromTo['from']
+                    )
+                    to = datetime.datetime.fromisoformat(
+                        fromTo['to']
+                    )
+                    if from_ < dt < to:
+                        return True
+            return False
+
+        else:
+            availability = self.item(
+                ids=space_id,
+            )
+            for result in availability:
+                for fromTo in result['availability']:
+                    from_ = datetime.datetime.fromisoformat(fromTo['from'])
+                    to = datetime.datetime.fromisoformat(fromTo['to'])
+                    if from_ < dt < to:
+                        return True
+            return False
 
 
 class _RoomBookings(_BaseAPI):
@@ -412,6 +454,384 @@ class _Hours(_BaseAPI):
         )
 
 
+class Location(dict):
+    @property
+    def categories(self):
+        ret = []
+        categoryResults = self['parent'].spaces.categories(ids=self['lid'])
+        for result in categoryResults:
+            if result['lid'] == self['lid']:
+                for cat in result['categories']:
+                    ret.append(Category(
+                        parent=self['parent'],
+                        location_name=self['name'],
+                        **cat
+                    ))
+        return ret
+
+    @property
+    def spaces(self):
+        ret = []
+        for cat in self.categories:
+            spacesResults = self['parent'].spaces.category(cid=cat['cid'])
+            for result in spacesResults:
+                for space in result['items']:
+                    ret.append(Space(
+                        parent=self['parent'],
+                        lid=self.id,
+                        location_name=self['name'],
+                        **space
+                    ))
+        return ret
+
+    @property
+    def id(self):
+        return self['lid']
+
+    def __str__(self):
+        return '<{}: name={}, id={}>'.format(type(self).__name__, self['name'], self.id)
+
+    def __repr__(self):
+        return str(self)
+
+
+class Category(dict):
+
+    @property
+    def id(self):
+        return self['cid']
+
+    def __str__(self):
+        return '<{}: name={}, id={}, location_name={}>'.format(
+            type(self).__name__,
+            self['name'],
+            self.id,
+            self['location_name'],
+        )
+
+    def __repr__(self):
+        return str(self)
+
+
+class Space(dict):
+
+    def is_available_at(self, dt=None):
+        dt = dt or datetime.datetime.now().astimezone()
+
+        for fromTo in self['availability']:
+            from_ = datetime.datetime.fromisoformat(
+                fromTo['from']
+            )
+            to = datetime.datetime.fromisoformat(
+                fromTo['to']
+            )
+            if from_ < dt < to:
+                return True
+
+        return False
+
+    @property
+    def seats(self):
+        if self['isBookableAsWhole'] is True:
+            return []
+
+        ret = []
+        seats = self['parent'].spaces.seats(
+            location_id=self['lid'],
+            spaceId=self['id'],
+        )
+        for seat in seats:
+            ret.append(Seat(
+                parent=self['parent'],
+                space_id=self.id,
+                space_name=self['name'],
+                location_name=self['location_name'],
+                **seat
+            ))
+
+        return ret
+
+    @property
+    def id(self):
+        return self['id']
+
+    def reserve(self, fname, lname, email, startDT=None, endDT=None, ):
+        '''
+        The start/end time has be match one of the availability slots.
+        :param startDT: datetime
+        :param endDT: endtime
+        :param fname:
+        :param lname:
+        :param email:
+        :return:
+        '''
+
+        assert self.is_available_at(), 'This space is not currently available'
+
+        startDT = startDT or datetime.datetime.now().astimezone()
+
+        # the startDT must match one of the availability slots
+        for fromTo in self['availability']:
+            from_ = datetime.datetime.fromisoformat(
+                fromTo['from']
+            )
+            to = datetime.datetime.fromisoformat(
+                fromTo['to']
+            )
+            if from_ <= startDT < to:
+                startDT = from_
+                break
+
+        # the endDT must match one of the availability slots
+        endDT = endDT or startDT
+        for fromTo in self['availability']:
+            from_ = datetime.datetime.fromisoformat(
+                fromTo['from']
+            )
+            to = datetime.datetime.fromisoformat(
+                fromTo['to']
+            )
+            if from_ <= endDT <= to:
+                endDT = to
+                break
+
+        # make the booking
+        booking = {
+            'id': self.id,
+            'to': endDT.isoformat(),
+        }
+
+        resp = self['parent'].spaces.reserve(
+            start=startDT,
+            fname=fname,
+            lname=lname,
+            email=email,
+            bookings=[booking],
+        )
+
+        return Booking(
+            parent=self['parent'],
+            **resp,
+        )
+
+    @property
+    def bookings(self):
+        ret = []
+        for booking in self['parent'].spaces.bookings(
+                eid=self.id,
+        ):
+            ret.append(Booking(
+                parent=self['parent'],
+                **booking,
+            ))
+        return ret
+
+    def __str__(self):
+        return '<{}: name={}, id={}, isAvailableNow={}, location_name={}>'.format(
+            type(self).__name__,
+            self['name'],
+            self.id,
+            self.is_available_at(),
+            self['location_name'],
+        )
+
+    def __repr__(self):
+        return str(self)
+
+
+class Seat(dict):
+    def is_available_at(self, dt=None):
+        dt = dt or datetime.datetime.now().astimezone()
+        if dt.tzname() is None:
+            dt = dt.astimezone()
+
+        for fromTo in self['availability']:
+            from_ = datetime.datetime.fromisoformat(
+                fromTo['from']
+            )
+            to = datetime.datetime.fromisoformat(
+                fromTo['to']
+            )
+            if from_ <= dt <= to:
+                return True
+
+        return False
+
+    @property
+    def id(self):
+        return self['id']
+
+    def reserve(self, fname, lname, email, startDT=None, endDT=None, ):
+        '''
+        The start/end time has be match one of the availability slots.
+        :param startDT: datetime
+        :param endDT: endtime
+        :param fname:
+        :param lname:
+        :param email:
+        :return:
+        '''
+
+        startDT = startDT or datetime.datetime.now().astimezone()
+        if startDT.tzname() is None:
+            startDT = startDT.astimezone()
+
+        assert self.is_available_at(startDT), 'This seat is not available at startDT={}'.format(startDT)
+
+        # the startDT must match one of the availability slots
+        for fromTo in self['availability']:
+            from_ = datetime.datetime.fromisoformat(
+                fromTo['from']
+            )
+            to = datetime.datetime.fromisoformat(
+                fromTo['to']
+            )
+            if from_ <= startDT < to:
+                startDT = from_
+                break
+
+        # the endDT must match one of the availability slots
+        endDT = endDT or startDT
+        if endDT.tzname() is None:
+            endDT = endDT.astimezone()
+
+        assert self.is_available_at(endDT), 'This seat is not available at endDT={}'.format(endDT)
+
+        for fromTo in self['availability']:
+            from_ = datetime.datetime.fromisoformat(
+                fromTo['from']
+            )
+            to = datetime.datetime.fromisoformat(
+                fromTo['to']
+            )
+            if from_ <= endDT <= to and to > startDT:
+                endDT = to
+                break
+
+        # make the booking
+        booking = {
+            'id': self['space_id'],
+            'to': endDT.isoformat(),
+            'seat_id': self.id
+        }
+
+        resp = self['parent'].spaces.reserve(
+            start=startDT,
+            fname=fname,
+            lname=lname,
+            email=email,
+            bookings=[booking],
+        )
+
+        return Booking(
+            parent=self['parent'],
+            **resp,
+        )
+
+    @property
+    def bookings(self):
+        ret = []
+        for booking in self['parent'].spaces.bookings(
+                seat_id=self.id,
+        ):
+            ret.append(Booking(
+                parent=self['parent'],
+                **booking,
+            ))
+        return ret
+
+    def __str__(self):
+        return '<{}: name={}, id={}, isAvailableNow={}, space_name={}, location_name={}>'.format(
+            type(self).__name__,
+            self['name'],
+            self.id,
+            self.is_available_at(),
+            self['space_name'],
+            self['location_name'],
+        )
+
+    def __repr__(self):
+        return str(self)
+
+
+class Booking(dict):
+
+    def __str__(self):
+        return '<{}: id={}, start={}, end={}, location_name={}, space_name={}, {}{}{}email={}>'.format(
+            type(self).__name__,
+            self.id,
+            self.start,
+            self.end,
+            self.location_name,
+            self.space_name,
+            'seat_name={}, '.format(self['seat_name']) if self.get('seat_name', None) else '',
+            'cancelled={}, '.format(self['cancelled']) if self.get('cancelled', None) else '',
+            'status={}, '.format(self['status']) if self.get('status', None) else '',
+            self.email,
+        )
+
+    def __repr__(self):
+        return str(self)
+
+    def _update(self):
+        for booking in self['parent'].spaces.booking(ids=self.id):
+            if booking['bookId'] == self.id or booking['booking_id'] == self.id:
+                print('777 booking=', booking)
+                self.update(booking)
+
+    @property
+    def id(self):
+        ID = self.get('booking_id', self.get('bookId', None))
+        if ID:
+            return ID
+        else:
+            raise KeyError('Cannot find Booking ID')
+
+    @property
+    def start(self):
+        if not self.get('fromDate', None):
+            self._update()
+        if 'fromDate' in self:
+            return datetime.datetime.fromisoformat(self['fromDate'])
+        else:
+            return None
+
+    @property
+    def end(self):
+        if not self.get('toDate', None):
+            self._update()
+        if 'toDate' in self:
+            return datetime.datetime.fromisoformat(self['toDate'])
+        else:
+            return None
+
+    @property
+    def location_name(self):
+        if not self.get('fromDate', None):
+            self._update()
+
+        return self['location_name']
+
+    @property
+    def space_name(self):
+        if not self.get('item_name', None):
+            self._update()
+        return self['item_name']
+
+    @property
+    def email(self):
+        if not self.get('email', None):
+            self._update()
+        return self['email']
+
+    def cancel(self):
+        resp = self['parent'].spaces.cancel(ids=self.id)
+        for item in resp:
+            if item.get('booking_id', None) == self.id:
+                self.update(item)
+        return resp
+
+
 class LibCal:
     def __init__(
             self,
@@ -460,3 +880,34 @@ class LibCal:
                 debug=self.debug
             )
         )
+
+    @property
+    def locations(self):
+        ret = []
+        locations = self.spaces.locations()
+        for loc in locations:
+            ret.append(Location(parent=self, **loc))
+        return ret
+
+    def find(self, booking_ids=None, seat_ids=None):
+        if booking_ids:
+            resp = self.spaces.booking(ids=booking_ids)
+            ret = []
+            for item in resp:
+                ret.append(Booking(
+                    parent=self,
+                    **item
+                ))
+            return ret
+
+        elif seat_ids:
+            ret = []
+            if isinstance(seat_ids, (int, str)):
+                seat_ids = [seat_ids]
+
+            for location in self.locations:
+                for space in location.spaces:
+                    for seat in space.seats:
+                        if seat.id in seat_ids:
+                            ret.append(seat)
+            return ret

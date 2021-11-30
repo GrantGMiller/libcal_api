@@ -1,6 +1,7 @@
+import datetime
+import random
 import config
 import libcal
-import datetime
 
 lc = libcal.LibCal(
     baseURL=config.BASE_URL,
@@ -9,70 +10,46 @@ lc = libcal.LibCal(
     # debug=True,
 )
 
-locations = lc.spaces.locations()
+# print out all the meeting spaces
+bookableItems = []
+for location in lc.locations:
+    print('location=', location)
 
-print('There {} {} location{}.'.format(
-    len(locations),
-    'are' if len(locations) > 1 else 'is',
-    's' if len(locations) > 1 else '',
-))
-for loc in locations:
-    print('Location Name: {}, ID: {}'.format(loc['name'], loc['lid']))
+    for space in location.spaces:
+        print('\tspace=', space)
 
-    res = lc.spaces.categories(ids=[d['lid'] for d in locations])
-    for item in res:
-        if item['lid'] == loc['lid']:
-            print('\tThis location has {} categor{}'.format(
-                len(item['categories']),
-                'ies' if len(item['categories']) > 1 else 'y',
-            ))
+        if not space.seats:
+            bookings = space.bookings
+            for booking in bookings:
+                print('\t\tbooking=', booking)
 
-            for cat in item['categories']:
-                print('\tCategory Name: {}, ID: {}'.format(
-                    cat['name'],
-                    cat['cid'],
-                ))
+        if len(space.seats) == 0 and space.is_available_at():
+            bookableItems.append(space)
+            pass
 
-                categoryResults = lc.spaces.category(cid=cat['cid'])
-                for categoryResult in categoryResults:
-                    if categoryResult['cid'] == cat['cid']:
-                        print('\t\tThis category has {} instance{}'.format(
-                            len(categoryResult['items']),
-                            's' if len(categoryResult['items']) > 1 else '',
-                        ))
-                        for instance in categoryResult['items']:
-                            print('\t\t\tInstance Name: {}, Seating Capacity: {}, ID: {}; {}'.format(
-                                instance['name'],
-                                instance['capacity'],
-                                instance['id'],
-                                'These seats can be booked individually.' if not instance['isBookableAsWhole'] else '',
-                            ))
+        for seat in space.seats:
+            print('\t\tseat=', seat)
+            if seat.is_available_at():
+                bookableItems.append(seat)
+                pass
+            for booking in seat.bookings:
+                print('\t\t\tbooking=', booking)
 
-                            availability = lc.spaces.item(
-                                ids=instance['id'],
-                            )
-                            isAvailableNow = False
-                            nowDT = datetime.datetime.now().astimezone()
-                            for result in availability:
-                                for fromTo in result['availability']:
-                                    from_ = datetime.datetime.fromisoformat(fromTo['from'])
-                                    to = datetime.datetime.fromisoformat(fromTo['to'])
-                                    if from_ < nowDT < to:
-                                        isAvailableNow = True
-                                        break
-                            print('\t\t\t{} is {}available now.'.format(
-                                instance['name'],
-                                'not ' if isAvailableNow is False else '',
-                            ))
-                            if instance['capacity'] > 1:
-                                print('\t\t\tThese are the seats.')
+item = random.choice(bookableItems)
+print('Creating a new booking for', item)
+booking = item.reserve(
+    startDT=datetime.datetime.now() + datetime.timedelta(hours=1),
+    fname=config.fname,
+    lname=config.lname,
+    email=config.email,
+)
+print('new booking=', booking)
 
-                                seats = lc.spaces.seats(
-                                    location_id=loc['lid'],
-                                    spaceId=instance['id'],
-                                )
-                                for item in seats:
-                                    print('\t\t\t\tSeat Name: {}, ID: {}'.format(
-                                        item['name'],
-                                        item['id'],
-                                    ))
+booking_id = booking.id
+print('looking up a booking by its id "{}"'.format(booking_id))
+bookings = lc.find(booking_ids=booking_id)
+for booking in bookings:
+    print('found booking=', booking)
+
+# cancel a booking
+booking.cancel()
