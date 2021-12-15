@@ -914,12 +914,10 @@ class LibCal:
 
 
 if __name__ == '__main__':
-    import datetime
     import random
     import config
-    import libcal
 
-    lc = libcal.LibCal(
+    lc = LibCal(
         baseURL=config.BASE_URL,
         clientID=config.CLIENT_ID,
         clientSecret=config.CLIENT_SECRET,
@@ -967,5 +965,6 @@ if __name__ == '__main__':
     for booking in bookings:
         print('found booking=', booking)
 
-    # cancel a booking
+    print('cancel a booking')
     booking.cancel()
+    print('after cancel booking=', booking)
