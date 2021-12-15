@@ -7,7 +7,7 @@ SpringShare has many APIs including the LibCal API. Used by many libraries and u
 
 `LibCal <https://springshare.com/libcal/>`_
 
-View your LibCal API Docs at your specific URL like "https://company.libcal.com/admin/api/1.1/"
+View your LibCal API Docs at your specific URL like "https://your=company.libcal.com/admin/api/1.1/"
 
 
 Usage
@@ -19,13 +19,14 @@ The spaces are organized by Location > Category > Spaces > Seats.
 
 Spaces might not have Seats, it might just be a large room that the user can book.
 
+You can book a space or room with the API. You can also look up bookings and edit them.
+
 Credentials
 ===========
 You will need to create a "Client ID" and "Client Secret" through the API webpage.
 
 https://your-company.libcal.com/admin/api/authentication
 
-,
 
 Example
 =======
@@ -37,7 +38,7 @@ Example
     import config
     
     lc = LibCal(
-        baseURL=config.BASE_URL,  # str like "https://company.libcal.com/"
+        baseURL=config.BASE_URL,  # str like "https://your-company.libcal.com/"
         clientID=config.CLIENT_ID,  # str
         clientSecret=config.CLIENT_SECRET,  # str
         # debug=True, # if True, all HTTP request/response will be printed
