@@ -1,13 +1,13 @@
 Python LibCal Interface
 =======================
 
-SpringShare has many APIs including the LibCal API. Used by many libraries and universities to organize spaces and rooms.
+SpringShare has many APIs including the LibCal API. Used by many libraries (like, the ones with books) and universities to organize spaces and rooms.
 
 `SpringShare <https://springshare.com/>`_
 
 `LibCal <https://springshare.com/libcal/>`_
 
-View your LibCal API Docs at your specific URL like "https://your=company.libcal.com/admin/api/1.1/"
+View your LibCal API Docs at your specific URL like "https://your-company.libcal.com/admin/api/1.1/"
 
 
 Usage
@@ -67,7 +67,7 @@ Example
     
     # book the seat if available
     for seat in seats:
-        if seat.is_available_at():  # no args means 'now'
+        if seat.is_available_at():  # no args means 'book it now'
             booking = seat.reserve(
                 startDT=datetime.datetime.now() + datetime.timedelta(hours=1),
                 fname='john',
@@ -84,7 +84,7 @@ Example Output
         space= <Space: name=Huddle Desk 1, id=124124, isAvailableNow=True, location_name=Nashville Office>
             seat= <Seat: name=Seat 1, id=158173, isAvailableNow=True, space_name=Huddle Desk 1, location_name=Nashville Office>
             seat= <Seat: name=Seat 2, id=158174, isAvailableNow=True, space_name=Huddle Desk 1, location_name=Nashville Office>
-       space= <Space: name=Huddle Desk 2, id=124151, isAvailableNow=True, location_name=Nashville Office>
+        space= <Space: name=Huddle Desk 2, id=124151, isAvailableNow=True, location_name=Nashville Office>
             seat= <Seat: name=Seat 1, id=158179, isAvailableNow=True, space_name=Huddle Desk 2, location_name=Nashville Office>
             seat= <Seat: name=Seat 2, id=158180, isAvailableNow=True, space_name=Huddle Desk 2, location_name=Nashville Office>
         space= <Space: name=Conference Room 101, id=124152, isAvailableNow=True, location_name=Nashville Office>
